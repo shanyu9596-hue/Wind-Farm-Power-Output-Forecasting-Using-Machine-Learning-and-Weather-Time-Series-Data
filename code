@@ -1,0 +1,570 @@
+# ============================================
+# Wind Farm Power Forecasting
+# Part 1 
+# ============================================
+import warnings
+warnings.filterwarnings("ignore")
+import os
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import plotly.express as px
+import plotly.graph_objects as go
+from sklearn.model_selection import TimeSeriesSplit
+# ============================================
+# Automatically Find Dataset
+# ============================================
+csv_path = None
+for root, dirs, files in os.walk("/kaggle/input"):
+    for file in files:
+        if file.endswith(".csv"):
+            csv_path = os.path.join(root, file)
+            break
+    if csv_path:
+        break
+if csv_path is None:
+    raise FileNotFoundError(
+        "No CSV file found in /kaggle/input.\n"
+        "Please attach your dataset to the notebook."
+    )
+print("Dataset Found:")
+print(csv_path)
+# ============================================
+# Load Dataset
+# ============================================
+df = pd.read_csv(csv_path)
+print("\nDataset Loaded Successfully\n")
+display(df.head())
+# ============================================
+# Dataset Information
+# ============================================
+print("Shape :", df.shape)
+print("\nColumns")
+print(df.columns.tolist())
+print("\nData Types")
+print(df.dtypes)
+print("\nStatistics")
+display(df.describe())
+# ============================================
+# Missing Values
+# ============================================
+print("\nMissing Values")
+display(df.isnull().sum())
+# ============================================
+# Remove Duplicates
+# ============================================
+df.drop_duplicates(inplace=True)
+# ============================================
+# Fill Missing Values
+# ============================================
+numeric_cols = df.select_dtypes(include=np.number).columns
+df[numeric_cols] = df[numeric_cols].fillna(df[numeric_cols].mean())
+print("\nDataset Shape After Cleaning")
+print(df.shape)
+# ============================================
+# Convert Timestamp
+# ============================================
+if "Timestamp" in df.columns:
+    df["Timestamp"] = pd.to_datetime(df["Timestamp"])
+    df["Year"] = df["Timestamp"].dt.year
+    df["Month"] = df["Timestamp"].dt.month
+    df["Day"] = df["Timestamp"].dt.day
+    df["Hour"] = df["Timestamp"].dt.hour
+# ============================================
+# Feature Engineering
+# ============================================
+df["WindDir_Sin"] = np.sin(np.deg2rad(df["WindDirection"]))
+df["WindDir_Cos"] = np.cos(np.deg2rad(df["WindDirection"]))
+df["WindSpeed_Square"] = df["WindSpeed"] ** 2
+df["WindSpeed_Cube"] = df["WindSpeed"] ** 3
+df["Power_Lag1"] = df["PowerOutput_kW"].shift(1)
+df["Power_Lag2"] = df["PowerOutput_kW"].shift(2)
+df["RollingMean_3"] = df["PowerOutput_kW"].rolling(3).mean()
+df["RollingMean_6"] = df["PowerOutput_kW"].rolling(6).mean()
+df.dropna(inplace=True)
+print("\nFeature Engineering Completed")
+# ============================================
+# EDA
+# ============================================
+plt.figure(figsize=(8,5))
+sns.histplot(df["WindSpeed"], bins=30, kde=True)
+plt.title("Wind Speed Distribution")
+plt.show()
+plt.figure(figsize=(8,5))
+sns.histplot(df["PowerOutput_kW"], bins=30, kde=True)
+plt.title("Power Output Distribution")
+plt.show()
+plt.figure(figsize=(8,5))
+sns.scatterplot(
+    x="WindSpeed",
+    y="PowerOutput_kW",
+    data=df
+)
+plt.title("Wind Speed vs Power Output")
+plt.show()
+plt.figure(figsize=(10,8))
+sns.heatmap(
+    df.corr(numeric_only=True),
+    annot=True,
+    cmap="coolwarm"
+)
+plt.title("Correlation Heatmap")
+plt.show()
+# ============================================
+# Plotly Interactive Charts
+# ============================================
+if "Timestamp" in df.columns:
+    fig = px.line(
+        df,
+        x="Timestamp",
+        y="PowerOutput_kW",
+        title="Power Output Over Time"
+    )
+    fig.show()
+fig = px.scatter(
+    df,
+    x="WindSpeed",
+    y="PowerOutput_kW",
+    color="Temperature",
+    title="Wind Speed vs Power Output"
+)
+fig.show()
+# ============================================
+# Features
+# ============================================
+features = [
+    "WindSpeed",
+    "WindDirection",
+    "Temperature",
+    "Humidity",
+    "Pressure",
+    "AirDensity",
+    "RotorSpeed",
+    "BladePitch",
+    "Hour",
+    "Month",
+    "WindDir_Sin",
+    "WindDir_Cos",
+    "WindSpeed_Square",
+    "WindSpeed_Cube",
+    "Power_Lag1",
+    "Power_Lag2",
+    "RollingMean_3",
+    "RollingMean_6"
+]
+target = "PowerOutput_kW"
+X = df[features]
+y = df[target]
+print("\nFeature Matrix :", X.shape)
+print("Target :", y.shape)
+# ============================================
+# Time Series Split
+# ============================================
+tscv = TimeSeriesSplit(n_splits=5)
+for fold, (train_index, test_index) in enumerate(tscv.split(X), start=1):
+    print(f"Fold {fold}")
+    print("Train:", len(train_index))
+    print("Test :", len(test_index))
+print("\nPart 1 Completed Successfully")
+# ============================================
+# Part 2 : Model Training
+# ============================================
+from sklearn.ensemble import RandomForestRegressor
+from xgboost import XGBRegressor
+from sklearn.metrics import (
+    mean_absolute_error,
+    mean_squared_error,
+    r2_score
+)
+# ============================================
+# Time Series Split
+# ============================================
+tscv = TimeSeriesSplit(n_splits=5)
+for train_index, test_index in tscv.split(X):
+    X_train = X.iloc[train_index]
+    X_test = X.iloc[test_index]
+    y_train = y.iloc[train_index]
+    y_test = y.iloc[test_index]
+print("Training Samples :", len(X_train))
+print("Testing Samples  :", len(X_test))
+# ============================================
+# Random Forest Model
+# ============================================
+rf = RandomForestRegressor(
+    n_estimators=200,
+    random_state=42,
+    n_jobs=-1
+)
+rf.fit(X_train, y_train)
+rf_prediction = rf.predict(X_test)
+# ============================================
+# XGBoost Model
+# ============================================
+xgb = XGBRegressor(
+    n_estimators=300,
+    learning_rate=0.05,
+    max_depth=6,
+    subsample=0.8,
+    colsample_bytree=0.8,
+    random_state=42,
+    objective="reg:squarederror"
+)
+xgb.fit(X_train, y_train)
+xgb_prediction = xgb.predict(X_test)
+# ============================================
+# Evaluation Function
+# ============================================
+def evaluate_model(name, actual, prediction):
+    mae = mean_absolute_error(actual, prediction)
+    rmse = np.sqrt(mean_squared_error(actual, prediction))
+    r2 = r2_score(actual, prediction)
+    print("="*40)
+    print(name)
+    print("="*40)
+    print("MAE :", round(mae,2))
+    print("RMSE:", round(rmse,2))
+    print("R2 Score:", round(r2,4))
+    return mae, rmse, r2
+rf_mae, rf_rmse, rf_r2 = evaluate_model(
+    "Random Forest",
+    y_test,
+    rf_prediction
+)
+xgb_mae, xgb_rmse, xgb_r2 = evaluate_model(
+    "XGBoost",
+    y_test,
+    xgb_prediction
+)
+# ============================================
+# Model Comparison Table
+# ============================================
+results = pd.DataFrame({
+    "Model":[
+        "Random Forest",
+        "XGBoost"
+    ],
+    "MAE":[
+        rf_mae,
+        xgb_mae
+    ],
+    "RMSE":[
+        rf_rmse,
+        xgb_rmse
+    ],
+    "R2 Score":[
+        rf_r2,
+        xgb_r2
+    ]
+})
+display(results)
+# ============================================
+# Feature Importance
+# ============================================
+importance = pd.DataFrame({
+    "Feature":X.columns,
+    "Importance":rf.feature_importances_
+})
+importance = importance.sort_values(
+    by="Importance",
+    ascending=False
+)
+plt.figure(figsize=(10,6))
+sns.barplot(
+    data=importance,
+    x="Importance",
+    y="Feature",
+    palette="viridis"
+)
+plt.title("Random Forest Feature Importance")
+plt.show()
+# ============================================
+# XGBoost Feature Importance
+# ============================================
+importance2 = pd.DataFrame({
+    "Feature":X.columns,
+    "Importance":xgb.feature_importances_
+})
+importance2 = importance2.sort_values(
+    by="Importance",
+    ascending=False
+)
+plt.figure(figsize=(10,6))
+sns.barplot(
+    data=importance2,
+    x="Importance",
+    y="Feature",
+    palette="magma"
+)
+plt.title("XGBoost Feature Importance")
+plt.show()
+# ============================================
+# Actual vs Predicted
+# ============================================
+plt.figure(figsize=(14,6))
+plt.plot(
+    y_test.values[:200],
+    label="Actual",
+    color="blue"
+)
+plt.plot(
+    rf_prediction[:200],
+    label="Random Forest",
+    color="green"
+)
+plt.plot(
+    xgb_prediction[:200],
+    label="XGBoost",
+    color="red"
+)
+plt.title("Actual vs Predicted")
+plt.xlabel("Samples")
+plt.ylabel("Power Output (kW)")
+plt.legend()
+plt.grid(True)
+plt.show()
+# ============================================
+# Residual Plot
+# ============================================
+residual = y_test - xgb_prediction
+plt.figure(figsize=(8,6))
+plt.scatter(
+    xgb_prediction,
+    residual,
+    alpha=0.6
+)
+plt.axhline(
+    0,
+    color="red",
+    linestyle="--"
+)
+plt.xlabel("Predicted")
+plt.ylabel("Residual")
+plt.title("Residual Plot")
+plt.grid(True)
+plt.show()
+# ============================================
+# Plotly Comparison
+# ============================================
+comparison = pd.DataFrame({
+    "Actual":y_test.values,
+    "Random Forest":rf_prediction,
+    "XGBoost":xgb_prediction
+})
+fig = px.line(
+    comparison.iloc[:300],
+    title="Actual vs Random Forest vs XGBoost"
+)
+fig.show()
+# ============================================
+# Save Models
+# ============================================
+import joblib
+joblib.dump(
+    rf,
+    "RandomForest_Model.pkl"
+)
+joblib.dump(
+    xgb,
+    "XGBoost_Model.pkl"
+)
+print("Models Saved Successfully")
+# ============================================
+# Save Predictions
+# ============================================
+prediction = X_test.copy()
+prediction["Actual"] = y_test.values
+prediction["RandomForest"] = rf_prediction
+prediction["XGBoost"] = xgb_prediction
+prediction.to_csv(
+    "Predictions.csv",
+    index=False
+)
+print("Predictions Saved")
+print("Part 2 Completed Successfully")
+# ============================================
+# Part 3
+# Explainable AI + Forecasting
+# ============================================
+import shap
+import joblib
+# ============================================
+# SHAP Explainability
+# ============================================
+print("Generating SHAP Values...")
+explainer = shap.TreeExplainer(xgb)
+sample = X_test.iloc[:300]
+shap_values = explainer.shap_values(sample)
+# Summary Plot
+shap.summary_plot(
+    shap_values,
+    sample
+)
+# Bar Plot
+shap.summary_plot(
+    shap_values,
+    sample,
+    plot_type="bar"
+)
+# Force Plot (First Sample)
+shap.initjs()
+shap.force_plot(
+    explainer.expected_value,
+    shap_values[0],
+    sample.iloc[0]
+)
+# ============================================
+# Predict Future Power
+# ============================================
+print("\nFuture Prediction")
+future = pd.DataFrame({
+    "WindSpeed":[12,15,18,20,16],
+    "WindDirection":[180,200,230,250,170],
+    "Temperature":[28,29,30,31,27],
+    "Humidity":[55,60,58,65,54],
+    "Pressure":[1012,1011,1010,1009,1013],
+    "AirDensity":[1.22,1.21,1.20,1.19,1.22],
+    "RotorSpeed":[90,110,130,145,115],
+    "BladePitch":[9,8,7,6,8],
+    "Hour":[8,9,10,11,12],
+    "Month":[6,6,6,6,6]
+})
+future["WindDir_Sin"] = np.sin(
+    np.deg2rad(future["WindDirection"])
+)
+future["WindDir_Cos"] = np.cos(
+    np.deg2rad(future["WindDirection"])
+)
+future["WindSpeed_Square"] = future["WindSpeed"]**2
+future["WindSpeed_Cube"] = future["WindSpeed"]**3
+future["Power_Lag1"] = df["PowerOutput_kW"].iloc[-1]
+future["Power_Lag2"] = df["PowerOutput_kW"].iloc[-2]
+future["RollingMean_3"] = df["PowerOutput_kW"].tail(3).mean()
+future["RollingMean_6"] = df["PowerOutput_kW"].tail(6).mean()
+future_prediction = xgb.predict(future)
+future["PredictedPower_kW"] = future_prediction
+display(future)
+# ============================================
+# Plot Forecast
+# ============================================
+plt.figure(figsize=(10,5))
+plt.plot(
+    future_prediction,
+    marker="o",
+    linewidth=3
+)
+plt.title("Future Power Forecast")
+plt.xlabel("Future Time Step")
+plt.ylabel("Predicted Power (kW)")
+plt.grid(True)
+plt.show()
+# ============================================
+# Plotly Forecast
+# ============================================
+future["Step"] = [
+    "T+1",
+    "T+2",
+    "T+3",
+    "T+4",
+    "T+5"
+]
+fig = px.line(
+    future,
+    x="Step",
+    y="PredictedPower_kW",
+    markers=True,
+    title="Future Wind Farm Power Forecast"
+)
+fig.show()
+# ============================================
+# Interactive Dashboard Charts
+# ============================================
+fig = px.scatter(
+    df,
+    x="WindSpeed",
+    y="PowerOutput_kW",
+    color="Temperature",
+    size="Humidity",
+    title="Interactive Wind Farm Dashboard"
+)
+fig.show()
+fig = px.histogram(
+    df,
+    x="PowerOutput_kW",
+    nbins=30,
+    title="Power Distribution"
+)
+fig.show()
+fig = px.box(
+    df,
+    y="PowerOutput_kW",
+    color="Month",
+    title="Monthly Power Distribution"
+)
+fig.show()
+# ============================================
+# Save Model
+# ============================================
+joblib.dump(
+    xgb,
+    "Final_XGBoost_Model.pkl"
+)
+print("Model Saved Successfully")
+# ============================================
+# Save Forecast
+# ============================================
+future.to_csv(
+    "FutureForecast.csv",
+    index=False
+)
+print("Forecast Saved")
+# ============================================
+# Final Comparison
+# ============================================
+comparison = pd.DataFrame({
+    "Model":[
+        "Random Forest",
+        "XGBoost"
+    ],
+    "MAE":[
+        rf_mae,
+        xgb_mae
+    ],
+    "RMSE":[
+        rf_rmse,
+        xgb_rmse
+    ],
+    "R2":[
+        rf_r2,
+        xgb_r2
+    ]
+})
+print(comparison)
+# ============================================
+# Best Model
+# ============================================
+best = comparison.sort_values(
+    "R2",
+    ascending=False
+)
+print("\nBest Model")
+display(best)
+# ============================================
+# Final Conclusion
+# ============================================
+print("="*60)
+print("PROJECT SUMMARY")
+print("="*60)
+print("""
+✔ Dataset Successfully Loaded
+✔ Feature Engineering Completed
+✔ Time Series Split Used
+✔ Random Forest Trained
+✔ XGBoost Trained
+✔ SHAP Explainability Completed
+✔ Forecast Generated
+✔ Interactive Charts Created
+✔ Model Saved
+✔ Forecast Saved
+Project Successfully Completed.
+""")
